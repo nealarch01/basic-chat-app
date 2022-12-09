@@ -11,26 +11,33 @@ type Client struct {
 	name       string
 }
 
-func clientHandler(client *Client, connectedClients map[string]*Client) {
+
+func broadcastMessage(self string, connectedClients *map[string]*Client, message string) {
+	for _, client := range *connectedClients {
+		if client.name == self {
+			continue // Do not send the message back to the client who sent it
+		}
+		client.connection.Write([]byte(message))
+	}
+}
+
+func clientHandler(client *Client, connectedClients *map[string]*Client) {
 	// Send a welcome message to the client
 	client.connection.Write([]byte("Welcome to the chat server, " + client.name + "!\n"))
 	scanner := bufio.NewScanner(client.connection) // Create a scanner to read the client's input
 	for scanner.Scan() {
 		msgSent := scanner.Text() // Get the message sent by the client
-		fmt.Println(msgSent)
 		// Broadcast the message to all other clients
-		for _, otherClient := range connectedClients {
-			if otherClient.name == client.name {
-				continue
-			}
-			chatMessage := "> " + client.name + ": " + msgSent + "\n"
-			otherClient.connection.Write([]byte(chatMessage))
-		}
+		formattedMessage := "> " + client.name + ": " + msgSent + "\n"
+		fmt.Print(formattedMessage)
+		broadcastMessage(client.name, connectedClients, formattedMessage)
 	}
 
 	// If the client has disconnected, remove them from the map
-	delete(connectedClients, client.name)
+	disconnectedName := client.name
+	delete(*connectedClients, client.name)
 	fmt.Println("Client disconnected")
+	broadcastMessage(disconnectedName, connectedClients, "\n"+disconnectedName+" has disconnected.\n")
 	// fmt.Println(connectedClients[client.name]) // Should print <nil> if the client has been removed
 	client.connection.Close()
 }
@@ -51,12 +58,14 @@ func main() {
 			fmt.Println("Error accepting: ", err.Error())
 			continue
 		}
-		// Print connection details
 		connection.Write([]byte("Please enter your name: "))
 		reader := bufio.NewReader(connection)
-		name, _ := reader.ReadString('\n')
-		// Remove the new line in name
-		name = name[:len(name)-1]
+		name, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Client disconnected before entering name")
+			continue
+		}
+		name = name[:len(name)-1] // Removes the newline character in name
 		// Check if the name is taken by doing a map lookup
 		existingClient := conenctedClients[name]
 		if existingClient != nil {
@@ -66,9 +75,9 @@ func main() {
 			connection.Close()
 			continue
 		}
-		// Add the client to the map
-		newClient := Client{connection, name}
-		conenctedClients[name] = &newClient
-		go clientHandler(&newClient, conenctedClients)
+		newClient := Client{connection, name} // Create a new client
+		conenctedClients[name] = &newClient // Add to the map
+		broadcastMessage(name, &conenctedClients, name+" has connected.\n")
+		go clientHandler(&newClient, &conenctedClients)
 	}
 }
